@@ -33,6 +33,10 @@ import (
 const (
 	forceSyncCycle      = 10 * time.Second // Time interval to force syncs, even if few peers are available
 	defaultMinSyncPeers = 5                // Amount of peers desired to start syncing
+
+	// syncDeclineLogInterval rate-limits the log line explaining why no sync cycle
+	// was started while snap sync is still pending.
+	syncDeclineLogInterval = time.Minute
 )
 
 // syncTransactions starts sending all currently pending transactions to the given peer.
@@ -58,6 +62,7 @@ type chainSyncer struct {
 	force       *time.Timer
 	forced      bool // true when force timer fired
 	warned      time.Time
+	declined    time.Time // last time a declined snap sync attempt was logged
 	peerEventCh chan struct{}
 	doneCh      chan error // non-nil when sync is running
 
@@ -117,6 +122,14 @@ func (cs *chainSyncer) loop() {
 			retry.stop()
 			cs.startSync(op)
 		} else {
+			// The force timer is one-shot and only re-armed after a sync cycle
+			// completes, and a zero wait disables the retry timer. When no cycle is
+			// running and nothing is scheduled, the loop would then only wake on a
+			// peer event, so a node whose peers stop announcing new heads never
+			// re-evaluates. Re-check at the force-sync interval instead.
+			if wait <= 0 && cs.doneCh == nil {
+				wait = forceSyncCycle
+			}
 			retry.reset(wait)
 		}
 		select {
@@ -235,6 +248,7 @@ func (cs *chainSyncer) nextSyncOp() (*chainSyncOp, time.Duration) {
 	}
 
 	if cs.handler.peers.len() < minPeers {
+		cs.logDeclined("not enough peers", "peers", cs.handler.peers.len(), "minPeers", minPeers)
 		return nil, 0
 	}
 	// We have enough peers, pick the one with the highest TD, but avoid going
@@ -242,6 +256,7 @@ func (cs *chainSyncer) nextSyncOp() (*chainSyncOp, time.Duration) {
 	// clients to direct the chain head to sync to.
 	peer, retry := cs.handler.peers.peerWithHighestTD(cs.handler.downloader.PeerBackoff)
 	if peer == nil {
+		cs.logDeclined("all peers backed off", "peers", cs.handler.peers.len(), "retry", retry)
 		return nil, retry
 	}
 
@@ -253,6 +268,8 @@ func (cs *chainSyncer) nextSyncOp() (*chainSyncOp, time.Duration) {
 	}
 
 	if op.td.Cmp(ourTD) <= 0 {
+		cs.logDeclined("no peer has a higher total difficulty", "mode", mode, "localTD", ourTD, "bestPeerTD", op.td, "bestPeer", peer.ID())
+
 		// We seem to be in sync according to the legacy rules. In the merge
 		// world, it can also mean we're stuck on the merge block, waiting for
 		// a beacon client. In the latter case, notify the user.
@@ -266,6 +283,17 @@ func (cs *chainSyncer) nextSyncOp() (*chainSyncOp, time.Duration) {
 	}
 
 	return op, 0
+}
+
+// logDeclined explains, at most once per syncDeclineLogInterval, why no sync cycle
+// was started while snap sync is still pending. A node in that state is not at
+// the chain head, so declining is the unexpected case worth surfacing.
+func (cs *chainSyncer) logDeclined(reason string, ctx ...interface{}) {
+	if !cs.handler.snapSync.Load() || time.Since(cs.declined) < syncDeclineLogInterval {
+		return
+	}
+	cs.declined = time.Now()
+	log.Warn("Snap sync pending but no sync cycle started", append([]interface{}{"reason", reason}, ctx...)...)
 }
 
 func peerToSyncOp(mode downloader.SyncMode, p *eth.Peer) *chainSyncOp {
