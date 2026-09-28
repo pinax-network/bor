@@ -19,6 +19,7 @@ import (
 	valset "github.com/ethereum/go-ethereum/consensus/bor/valset"
 	core "github.com/ethereum/go-ethereum/core"
 	state "github.com/ethereum/go-ethereum/core/state"
+	tracing "github.com/ethereum/go-ethereum/core/tracing"
 	types1 "github.com/ethereum/go-ethereum/core/types"
 	vm "github.com/ethereum/go-ethereum/core/vm"
 	rpc "github.com/ethereum/go-ethereum/rpc"
@@ -50,17 +51,17 @@ func (m *MockSpanner) EXPECT() *MockSpannerMockRecorder {
 }
 
 // CommitSpan mocks base method.
-func (m *MockSpanner) CommitSpan(ctx context.Context, minimalSpan types.Span, validators, producers []types0.MinimalVal, arg4 vm.StateDB, header *types1.Header, chainContext core.ChainContext, vmCfg vm.Config) error {
+func (m *MockSpanner) CommitSpan(arg0 context.Context, arg1 types.Span, arg2, arg3 []types0.MinimalVal, arg4 vm.StateDB, arg5 *types1.Header, arg6 core.ChainContext, arg7 *tracing.Hooks) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CommitSpan", ctx, minimalSpan, validators, producers, arg4, header, chainContext, vmCfg)
+	ret := m.ctrl.Call(m, "CommitSpan", arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // CommitSpan indicates an expected call of CommitSpan.
-func (mr *MockSpannerMockRecorder) CommitSpan(ctx, minimalSpan, validators, producers, arg4, header, chainContext, vmCfg any) *gomock.Call {
+func (mr *MockSpannerMockRecorder) CommitSpan(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitSpan", reflect.TypeOf((*MockSpanner)(nil).CommitSpan), ctx, minimalSpan, validators, producers, arg4, header, chainContext, vmCfg)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitSpan", reflect.TypeOf((*MockSpanner)(nil).CommitSpan), arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7)
 }
 
 // GetCurrentSpan mocks base method.

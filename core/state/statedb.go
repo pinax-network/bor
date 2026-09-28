@@ -180,6 +180,9 @@ type StateDB struct {
 
 	// Bor metrics
 	BorConsensusTime time.Duration
+
+	// requires to maintain Firehose 2.3 backward compatibility
+	hooks *tracing.Hooks
 }
 
 // New creates a new state from a given trie.
@@ -1171,6 +1174,7 @@ func (s *StateDB) SelfDestruct(addr common.Address) uint256.Int {
 	stateObject = s.mvRecordWritten(stateObject)
 
 	prevBalance = *(stateObject.Balance())
+
 	// Regardless of whether it is already destructed or not, we do have to
 	// journal the balance-change, if we set it to zero here.
 	if !stateObject.Balance().IsZero() {
@@ -1337,7 +1341,11 @@ func (s *StateDB) mvRecordWritten(object *stateObject) *stateObject {
 // existing account with the given address, otherwise it will be silently overwritten.
 func (s *StateDB) createObject(addr common.Address) *stateObject {
 	obj := newObject(s, addr, nil)
-	s.journal.createObject(addr)
+	if s.hooks != nil && s.hooks.OnNewAccount != nil {
+		s.hooks.OnNewAccount(addr)
+	}
+
+	s.journal.append(createObjectChange{account: addr})
 	s.setStateObject(obj)
 	MVWrite(s, blockstm.NewAddressKey(addr))
 	return obj
@@ -1902,6 +1910,10 @@ func (s *StateDB) handleDestruction(noStorageWiping bool) (map[common.Hash]*acco
 // GetTrie returns the account trie.
 func (s *StateDB) GetTrie() Trie {
 	return s.trie
+}
+
+func (s *StateDB) IsVerkle() bool {
+	return s.GetTrie().IsVerkle()
 }
 
 // commit gathers the state mutations accumulated along with the associated

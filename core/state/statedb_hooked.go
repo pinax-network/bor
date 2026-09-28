@@ -43,6 +43,10 @@ func NewHookedState(stateDb *StateDB, hooks *tracing.Hooks) *hookedStateDB {
 	if s.hooks == nil {
 		s.hooks = new(tracing.Hooks)
 	}
+
+	// Requires to maintain Firehose 2.3 backward compatibility
+	stateDb.hooks = s.hooks
+
 	return s
 }
 
@@ -210,7 +214,10 @@ func (s *hookedStateDB) SetCode(address common.Address, code []byte, reason trac
 		codeHash := crypto.Keccak256Hash(code)
 
 		// Invoke the hooks only if the contract code is changed
-		if prevHash != codeHash {
+		// Firehose: For geth at release v1.16.7, have submitted a pull request (#32980), where `prevHash != codeHash` was
+		// added to fix a "bug" where `OnCodeChange` was called without an actual code change. We disabled the code below by
+		// forcing the condition to true, maintaining backward compatibility.
+		if true || prevHash != codeHash {
 			if s.hooks.OnCodeChangeV2 != nil {
 				s.hooks.OnCodeChangeV2(address, prevHash, prev, codeHash, code, reason)
 			} else if s.hooks.OnCodeChange != nil {
@@ -266,7 +273,9 @@ func (s *hookedStateDB) SelfDestruct6780(address common.Address) (uint256.Int, b
 
 	prev, changed := s.inner.SelfDestruct6780(address)
 
-	if s.hooks.OnBalanceChange != nil && !prev.IsZero() {
+	// Firehose: For geth at release v1.16.4, have submitted a pull request (#32526), where `changed` was removed to
+	// fix a bug where `OnBalanceChange` was called when it shouldn't have.
+	if s.hooks.OnBalanceChange != nil && changed && !prev.IsZero() {
 		s.hooks.OnBalanceChange(address, prev.ToBig(), new(big.Int), tracing.BalanceDecreaseSelfdestruct)
 	}
 

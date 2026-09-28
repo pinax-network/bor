@@ -170,7 +170,7 @@ func TestApplyMessage_SuccessPath(t *testing.T) {
 	header := newTestHeader()
 
 	msg := GetSystemMessage(stateReceiverAddr, []byte{})
-	gasUsed, err := ApplyMessage(context.Background(), msg, statedb, header, cfg, &stubChainContext{cfg: cfg}, vm.Config{})
+	gasUsed, err := ApplyMessage(context.Background(), msg, statedb, header, cfg, &stubChainContext{cfg: cfg}, nil, 0)
 	require.NoError(t, err)
 	require.Greater(t, gasUsed, uint64(0))
 }

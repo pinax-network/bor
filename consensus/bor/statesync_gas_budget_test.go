@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/bor/statefull"
 	"github.com/ethereum/go-ethereum/consensus/bor/valset"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/params"
@@ -91,7 +92,7 @@ func TestCommitStates_StateSyncGasBudget(t *testing.T) {
 			statedb := newStateDBForTest(t, genesis.Root)
 			h := &types.Header{Number: big.NewInt(16), ParentHash: genesis.Hash(), Time: uint64(now.Unix())}
 
-			result, err := b.CommitStates(statedb, h, statefull.ChainContext{Chain: hc, Bor: b})
+			result, err := b.CommitStates(statedb, h, statefull.ChainContext{Chain: hc, Bor: b}, nil)
 			require.NoError(t, err)
 			// CommitStates must return exactly the contiguous prefix admitted by the budget.
 			require.Len(t, result, tc.want)
@@ -112,7 +113,7 @@ type stateSyncContextContract struct {
 	transientValue common.Hash
 }
 
-func (m *stateSyncContextContract) CommitState(_ *clerk.EventRecordWithTime, state vm.StateDB, _ *types.Header, _ statefull.ChainContext, _ vm.Config) (uint64, error) {
+func (m *stateSyncContextContract) CommitState(_ *clerk.EventRecordWithTime, state vm.StateDB, _ *types.Header, _ statefull.ChainContext, _ *tracing.Hooks) (uint64, error) {
 	m.t.Helper()
 	if m.wantPrepared {
 		// Preparation removes stale state while warming the canonical sender and destination.
@@ -207,7 +208,7 @@ func TestCommitStates_StateSyncContextPreparation(t *testing.T) {
 			trackedState := &prepareTrackingState{StateDB: statedb}
 			header := &types.Header{Number: big.NewInt(16), ParentHash: genesis.Hash(), Time: uint64(now.Unix())}
 
-			result, err := b.CommitStates(trackedState, header, chainContext)
+			result, err := b.CommitStates(trackedState, header, chainContext, nil)
 			require.NoError(t, err)
 			// Each included record executes exactly once and each eligible execution
 			// receives exactly one Prepare call.

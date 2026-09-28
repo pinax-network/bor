@@ -1203,19 +1203,27 @@ func (c *Bor) Finalize(chain consensus.ChainHeaderReader, header *types.Header, 
 		stateSyncData []*types.StateSyncData
 		err           error
 	)
+
+	var tracer *tracing.Hooks
+	switch c := chain.(type) {
+	case *core.HeaderChain:
+		tracer = c.GetTracingHooks()
+	case *core.BlockChain:
+		tracer = c.GetTracingHooks()
+	}
 	if IsSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
 		start := time.Now()
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 		// check and commit span
 		if !c.config.IsRio(header.Number) {
-			if err := c.checkAndCommitSpan(wrappedState, header, cx); err != nil {
+			if err := c.checkAndCommitSpan(wrappedState, header, cx, tracer); err != nil {
 				return nil, fmt.Errorf("error while committing span: %w", err)
 			}
 		}
 
 		if c.HeimdallClient != nil {
 			// commit states
-			stateSyncData, err = c.CommitStates(wrappedState, header, cx)
+			stateSyncData, err = c.CommitStates(wrappedState, header, cx, tracer)
 			if err != nil {
 				return nil, fmt.Errorf("%w: error while committing states: %w", core.ErrStateSyncProcessing, err)
 			}
@@ -1268,6 +1276,9 @@ func (c *Bor) Finalize(chain consensus.ChainHeaderReader, header *types.Header, 
 		return nil, fmt.Errorf("%w: hash mismatch, got %s want %s", core.ErrStateSyncMismatch, lastTx.Hash(), stateSyncTx.Hash())
 	}
 	receipts = insertStateSyncTransactionAndCalculateReceipt(lastTx, header, body, wrappedState, receipts)
+	if tracer != nil && tracer.OnStateSyncReceipt != nil {
+		tracer.OnStateSyncReceipt(lastTx, receipts[len(receipts)-1])
+	}
 	return receipts, nil
 }
 
@@ -1424,7 +1435,8 @@ func (c *Bor) commitSprintWork(chain consensus.ChainHeaderReader, header *types.
 
 	// check and commit span
 	if !c.config.IsRio(header.Number) {
-		if err := c.checkAndCommitSpan(state, header, cx); err != nil {
+		// Block assembly runs without Firehose tracing; pass a nil tracer.
+		if err := c.checkAndCommitSpan(state, header, cx, nil); err != nil {
 			log.Error("Error while committing span", "error", err)
 			return nil, err
 		}
@@ -1435,7 +1447,7 @@ func (c *Bor) commitSprintWork(chain consensus.ChainHeaderReader, header *types.
 	if c.HeimdallClient != nil {
 		// commit states
 		var err error
-		stateSyncData, err = c.CommitStates(state, header, cx)
+		stateSyncData, err = c.CommitStates(state, header, cx, nil)
 		if err != nil {
 			log.Error("Error while committing states", "error", err)
 			return nil, err
@@ -1669,6 +1681,7 @@ func (c *Bor) checkAndCommitSpan(
 	state vm.StateDB,
 	header *types.Header,
 	chain core.ChainContext,
+	tracer *tracing.Hooks,
 ) error {
 	var ctx = context.Background()
 	headerNumber := header.Number.Uint64()
@@ -1685,7 +1698,7 @@ func (c *Bor) checkAndCommitSpan(
 	tempState.IntermediateRoot(false)
 
 	if c.needToCommitSpan(span, headerNumber) {
-		return c.FetchAndCommitSpan(ctx, span.Id+1, state, header, chain)
+		return c.FetchAndCommitSpan(ctx, span.Id+1, state, header, chain, tracer)
 	}
 
 	return nil
@@ -1724,6 +1737,7 @@ func (c *Bor) FetchAndCommitSpan(
 	state vm.StateDB,
 	header *types.Header,
 	chain core.ChainContext,
+	tracer *tracing.Hooks,
 ) error {
 	var (
 		minSpan    borTypes.Span
@@ -1787,7 +1801,7 @@ func (c *Bor) FetchAndCommitSpan(
 		)
 	}
 
-	return c.spanner.CommitSpan(ctx, minSpan, validators, producers, state, header, chain, c.vmConfig)
+	return c.spanner.CommitSpan(ctx, minSpan, validators, producers, state, header, chain, tracer)
 }
 
 // CommitStates commit states
@@ -1795,6 +1809,7 @@ func (c *Bor) CommitStates(
 	state vm.StateDB,
 	header *types.Header,
 	chain statefull.ChainContext,
+	tracer *tracing.Hooks,
 ) ([]*types.StateSyncData, error) {
 	fetchStart := time.Now()
 	number := header.Number.Uint64()
@@ -1937,7 +1952,7 @@ func (c *Bor) CommitStates(
 
 		// Receipt construction expects the receiver call to emit at least one log.
 		// A receiver without code can complete without producing one.
-		gasUsed, err = c.GenesisContractsClient.CommitState(eventRecord, state, header, chain, c.vmConfig)
+		gasUsed, err = c.GenesisContractsClient.CommitState(eventRecord, state, header, chain, tracer)
 		if err != nil {
 			return nil, err
 		}

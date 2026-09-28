@@ -163,7 +163,15 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		stateSyncReceipt *types.Receipt
 		stateSyncEndErr  error
 	)
-	if hooks := cfg.Tracer; hooks != nil && hasStateSyncTx && hooks.OnTxStart != nil && hooks.OnTxEnd != nil {
+	//
+	// A tracer that provides OnTxStartWithHash (Firehose) opens and closes the state-sync
+	// transaction itself, per commitState event, inside consensus/bor/statefull.ApplyMessage
+	// (the pre-#2236 behavior). Firing this generic single-window OnTxStart for it too would
+	// open a second, nested transaction over the same events and trip the tracer's invariants
+	// (Firehose panics in ensureInBlockAndNotInTrxAndNotInCall). Skip the generic wrapper for
+	// such tracers; see the matching guard in eth.New (eth/backend.go) that also leaves them
+	// unwrapped by WrapStateSyncHooks. This keeps Firehose's state-sync output identical to v2.8.2.
+	if hooks := cfg.Tracer; hooks != nil && hasStateSyncTx && hooks.OnTxStart != nil && hooks.OnTxEnd != nil && hooks.OnTxStartWithHash == nil {
 		hooks.OnTxStart(evm.GetVMContext(), txs[len(txs)-1], params.BorSystemAddress)
 		defer func() {
 			hooks.OnTxEnd(stateSyncReceipt, stateSyncEndErr)
@@ -245,10 +253,10 @@ func ApplyTransactionWithEVM(msg *Message, gp *GasPool, statedb *state.StateDB, 
 		// (see core/state_transition.go); for non-Bor configs the base fee is
 		// implicitly burned and there's no contract to credit.
 		// Use `evm.StateDB` for using hooked state db if tracing is enabled
-		evm.StateDB.AddBalance(result.BurntContractAddress, cmath.BigIntToUint256Int(result.FeeBurnt), tracing.BalanceChangeTransfer)
+		evm.StateDB.AddBalance(result.BurntContractAddress, cmath.BigIntToUint256Int(result.FeeBurnt), tracing.BalanceChangePolygonBurn)
 	}
 
-	evm.StateDB.AddBalance(evm.Context.Coinbase, cmath.BigIntToUint256Int(result.FeeTipped), tracing.BalanceChangeTransfer)
+	evm.StateDB.AddBalance(evm.Context.Coinbase, cmath.BigIntToUint256Int(result.FeeTipped), tracing.BalanceIncreaseRewardTransactionFee)
 	output1 := new(big.Int).SetBytes(result.SenderInitBalance.Bytes())
 	output2 := new(big.Int).SetBytes(coinbaseBalance.Bytes())
 

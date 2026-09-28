@@ -87,6 +87,9 @@ type (
 	// to be used for address of the caller.
 	TxStartHook = func(vm *VMContext, tx *types.Transaction, from common.Address)
 
+	// TxStartWithHashHook is used by firehose when processing special transactions that have a hash artificially set (for compatibility with older versions fh2.x)
+	TxStartWithHashHook = func(vm *VMContext, tx *types.Transaction, from common.Address, hash common.Hash)
+
 	// TxEndHook is called after the execution of a transaction ends.
 	TxEndHook = func(receipt *types.Receipt, err error)
 
@@ -194,13 +197,14 @@ type (
 
 type Hooks struct {
 	// VM events
-	OnTxStart   TxStartHook
-	OnTxEnd     TxEndHook
-	OnEnter     EnterHook
-	OnExit      ExitHook
-	OnOpcode    OpcodeHook
-	OnFault     FaultHook
-	OnGasChange GasChangeHook
+	OnTxStart         TxStartHook
+	OnTxStartWithHash TxStartWithHashHook
+	OnTxEnd           TxEndHook
+	OnEnter           EnterHook
+	OnExit            ExitHook
+	OnOpcode          OpcodeHook
+	OnFault           FaultHook
+	OnGasChange       GasChangeHook
 	// Chain events
 	OnBlockchainInit    BlockchainInitHook
 	OnClose             CloseHook
@@ -221,6 +225,17 @@ type Hooks struct {
 	OnLog           LogHook
 	// Block hash read
 	OnBlockHashRead BlockHashReadHook
+
+	// Firehose requirements.
+	//
+	// Search a368bc8a3737 within the repository to find all the details
+	OnNewAccount       func(address common.Address)
+	OnStateSyncReceipt func(tx *types.Transaction, receipt *types.Receipt)
+
+	// Firehose requirements.
+	//
+	// Search 11471b22bb0b within the repository to find all the details
+	OnKeccakPreimage func(hash common.Hash, preimage []byte)
 }
 
 // BalanceChangeReason is used to indicate the reason for a balance change, useful
@@ -276,7 +291,14 @@ const (
 	// BalanceChangeRevert is emitted when the balance is reverted back to a previous value due to call failure.
 	// It is only emitted when the tracer has opted in to use the journaling wrapper (WrapWithJournal).
 	BalanceChangeRevert BalanceChangeReason = 15
+
+	// Polygon specific balance changes
+
+	// BalanceChangePolygonBurn is ether burned on Polygon by sending it to a designated burn contract.
+	BalanceChangePolygonBurn BalanceChangeReason = 200
 )
+
+//go:generate go run golang.org/x/tools/cmd/stringer@latest -type=GasChangeReason -trimprefix=GasChange -output gen_gas_change_reason_stringer.go
 
 // GasChangeReason is used to indicate the reason for a gas change, useful
 // for tracing and reporting.

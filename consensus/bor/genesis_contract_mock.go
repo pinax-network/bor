@@ -17,6 +17,7 @@ import (
 	clerk "github.com/ethereum/go-ethereum/consensus/bor/clerk"
 	statefull "github.com/ethereum/go-ethereum/consensus/bor/statefull"
 	state "github.com/ethereum/go-ethereum/core/state"
+	tracing "github.com/ethereum/go-ethereum/core/tracing"
 	types "github.com/ethereum/go-ethereum/core/types"
 	vm "github.com/ethereum/go-ethereum/core/vm"
 	gomock "go.uber.org/mock/gomock"
@@ -47,18 +48,18 @@ func (m *MockGenesisContract) EXPECT() *MockGenesisContractMockRecorder {
 }
 
 // CommitState mocks base method.
-func (m *MockGenesisContract) CommitState(event *clerk.EventRecordWithTime, arg1 vm.StateDB, header *types.Header, chCtx statefull.ChainContext, vmCfg vm.Config) (uint64, error) {
+func (m *MockGenesisContract) CommitState(arg0 *clerk.EventRecordWithTime, arg1 vm.StateDB, arg2 *types.Header, arg3 statefull.ChainContext, arg4 *tracing.Hooks) (uint64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CommitState", event, arg1, header, chCtx, vmCfg)
+	ret := m.ctrl.Call(m, "CommitState", arg0, arg1, arg2, arg3, arg4)
 	ret0, _ := ret[0].(uint64)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // CommitState indicates an expected call of CommitState.
-func (mr *MockGenesisContractMockRecorder) CommitState(event, arg1, header, chCtx, vmCfg any) *gomock.Call {
+func (mr *MockGenesisContractMockRecorder) CommitState(arg0, arg1, arg2, arg3, arg4 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitState", reflect.TypeOf((*MockGenesisContract)(nil).CommitState), event, arg1, header, chCtx, vmCfg)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitState", reflect.TypeOf((*MockGenesisContract)(nil).CommitState), arg0, arg1, arg2, arg3, arg4)
 }
 
 // LastStateId mocks base method.

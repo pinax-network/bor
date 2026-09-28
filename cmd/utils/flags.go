@@ -621,6 +621,7 @@ var (
 		Name:     "vmtrace",
 		Usage:    "Name of tracer which should record internal VM operations (costly)",
 		Category: flags.VMCategory,
+		Value:    "",
 	}
 	VMTraceJsonConfigFlag = &cli.StringFlag{
 		Name:     "vmtrace.jsonconfig",
@@ -2091,11 +2092,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}()
 
 	// VM tracing config.
-	if ctx.IsSet(VMTraceFlag.Name) {
-		if name := ctx.String(VMTraceFlag.Name); name != "" {
-			cfg.VMTrace = name
-			cfg.VMTraceJsonConfig = ctx.String(VMTraceJsonConfigFlag.Name)
-		}
+	if name := ctx.String(VMTraceFlag.Name); name != "" {
+		cfg.VMTrace = name
+		cfg.VMTraceJsonConfig = ctx.String(VMTraceJsonConfigFlag.Name)
 	}
 }
 
@@ -2523,15 +2522,13 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readonly bool) (*core.BlockCh
 		EnableWitnessStats:      ctx.Bool(VMWitnessStatsFlag.Name),
 		StatelessSelfValidation: ctx.Bool(VMStatelessSelfValidationFlag.Name) || ctx.Bool(VMWitnessStatsFlag.Name),
 	}
-	if ctx.IsSet(VMTraceFlag.Name) {
-		if name := ctx.String(VMTraceFlag.Name); name != "" {
-			config := json.RawMessage(ctx.String(VMTraceJsonConfigFlag.Name))
-			t, err := tracers.LiveDirectory.New(name, config)
-			if err != nil {
-				Fatalf("Failed to create tracer %q: %v", name, err)
-			}
-			vmcfg.Tracer = t
+	if name := ctx.String(VMTraceFlag.Name); name != "" {
+		config := json.RawMessage(ctx.String(VMTraceJsonConfigFlag.Name))
+		t, err := tracers.LiveDirectory.New(name, config)
+		if err != nil {
+			Fatalf("Failed to create tracer %q: %v", name, err)
 		}
+		vmcfg.Tracer = t
 	}
 	options.VmConfig = vmcfg
 

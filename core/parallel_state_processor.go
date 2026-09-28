@@ -237,11 +237,13 @@ func (task *ExecutionTask) applyDelayedFee(coinbaseBalance *uint256.Int) {
 	if task.config.IsLondon(task.blockNumber) && task.result.FeeBurnt != nil {
 		// FeeBurnt is only populated for Bor-enabled chains; non-Bor configs
 		// (Ethereum spec tests) implicitly burn the base fee with no credit.
+		// Firehose: use PolygonBurn so live tracing maps this to REASON_BURN.
 		task.finalStateDB.AddBalance(task.result.BurntContractAddress,
-			cmath.BigIntToUint256Int(task.result.FeeBurnt), tracing.BalanceChangeTransfer)
+			cmath.BigIntToUint256Int(task.result.FeeBurnt), tracing.BalanceChangePolygonBurn)
 	}
+	// Firehose: keep RewardTransactionFee reason (not generic Transfer).
 	task.finalStateDB.AddBalance(task.coinbase,
-		cmath.BigIntToUint256Int(task.result.FeeTipped), tracing.BalanceChangeTransfer)
+		cmath.BigIntToUint256Int(task.result.FeeTipped), tracing.BalanceIncreaseRewardTransactionFee)
 	output1 := new(big.Int).SetBytes(task.result.SenderInitBalance.Bytes())
 	output2 := new(big.Int).SetBytes(coinbaseBalance.Bytes())
 	// Deprecated transfer log; do not use going forward — parameters
