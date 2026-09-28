@@ -60,7 +60,7 @@ type Config struct {
 	// Record information useful for VM and contract debugging
 	EnablePreimageRecording bool `hcl:"vmdebug,optional" toml:"vmdebug,optional"`
 
-	// VMTrace enables live VM tracing at startup
+	// Name of tracer which should record internal VM operations (costly)
 	VMTrace string `hcl:"vmtrace,optional" toml:"vmtrace,optional"`
 
 	// VMTraceJsonConfig is the JSON config for the VM tracer
@@ -824,6 +824,7 @@ type RelayConfig struct {
 
 func DefaultConfig() *Config {
 	return &Config{
+
 		Chain:                       "mainnet",
 		Ethstats:                    "",
 		Identity:                    Hostname(),

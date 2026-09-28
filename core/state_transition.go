@@ -626,11 +626,14 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 		// implicitly burned the upstream go-ethereum way, matching Ethereum
 		// mainnet semantics. Without the nil-guard, Ethereum-spec test
 		// fixtures with Bor == nil panic here.
+		//
+		// Firehose: keep BalanceChangePolygonBurn (not generic Transfer) so
+		// live tracing maps this to REASON_BURN.
 		if bor := st.evm.ChainConfig().Bor; bor != nil {
 			burntContractAddress = common.HexToAddress(bor.CalculateBurntContract(st.evm.Context.BlockNumber.Uint64()))
 			burnAmount = new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
 			if !st.noFeeBurnAndTip {
-				st.state.AddBalance(burntContractAddress, cmath.BigIntToUint256Int(burnAmount), tracing.BalanceChangeTransfer)
+				st.state.AddBalance(burntContractAddress, cmath.BigIntToUint256Int(burnAmount), tracing.BalanceChangePolygonBurn)
 			}
 		}
 	}

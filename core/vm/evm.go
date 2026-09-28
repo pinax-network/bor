@@ -618,7 +618,22 @@ func (evm *EVM) create(caller common.Address, code []byte, gas uint64, value *ui
 	snapshot := evm.StateDB.Snapshot()
 	if !evm.StateDB.Exist(address) {
 		evm.StateDB.CreateAccount(address)
+	} else {
+		// Firehose: In previous versions of the EVM, there was no `evm.StateDB.Exist`
+		// above and the `CreateAccount` was always called. This was leading to
+		// always get a `OnNewAccount` event in the tracer as we were not checking
+		// previous existence of the account.
+		//
+		// With the introduction of the `Exist` method, there is now cases where
+		// `CreateAccount` is not called if it was previously existing.
+		//
+		// To keep the same tracing behavior as before, we call the `OnNewAccount`
+		// manually here if the account was previously existing.
+		if evm.Config.Tracer != nil && evm.Config.Tracer.OnNewAccount != nil {
+			evm.Config.Tracer.OnNewAccount(address)
+		}
 	}
+
 	// CreateContract means that regardless of whether the account previously existed
 	// in the state trie or not, it _now_ becomes created as a _contract_ account.
 	// This is performed _prior_ to executing the initcode,  since the initcode
@@ -698,7 +713,10 @@ func (evm *EVM) initNewContract(contract *Contract, address common.Address) ([]b
 		}
 	}
 
-	if len(ret) > 0 {
+	// Firehose: For geth at release v1.16.7, have submitted a pull request (#32916 ), where `len(ret) > 0` was
+	// added to prevent a no-op call to set the contract's code. We disabled the code below by
+	// forcing the condition to true, maintaining backward compatibility for Firehose users.
+	if true || len(ret) > 0 {
 		evm.StateDB.SetCode(address, ret, tracing.CodeChangeContractCreation)
 	}
 	return ret, err

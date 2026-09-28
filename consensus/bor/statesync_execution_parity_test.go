@@ -29,8 +29,8 @@ type recordingGenesisContract struct {
 	gasUsed uint64
 }
 
-func (c *recordingGenesisContract) CommitState(event *clerk.EventRecordWithTime, state vm.StateDB, header *types.Header, chain statefull.ChainContext, config vm.Config) (uint64, error) {
-	gasUsed, err := c.client.CommitState(event, state, header, chain, config)
+func (c *recordingGenesisContract) CommitState(event *clerk.EventRecordWithTime, state vm.StateDB, header *types.Header, chain statefull.ChainContext, tracer *tracing.Hooks) (uint64, error) {
+	gasUsed, err := c.client.CommitState(event, state, header, chain, tracer)
 	if err != nil {
 		return 0, err
 	}
@@ -103,7 +103,7 @@ func runTransientStorageParity(t *testing.T, gasBoundBlock *big.Int) common.Hash
 	recorder := &recordingGenesisContract{client: contract.NewGenesisContractsClient(chainConfig, borConfig.ValidatorContract, borConfig.StateReceiverContract, nil)}
 	b.GenesisContractsClient = recorder
 	liveState := newState()
-	stateSyncs, err := b.CommitStates(liveState, header, chainContext)
+	stateSyncs, err := b.CommitStates(liveState, header, chainContext, nil)
 	require.NoError(t, err)
 	require.Len(t, stateSyncs, 2)
 

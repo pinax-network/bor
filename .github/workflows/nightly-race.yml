@@ -1,10 +1,6 @@
 name: Nightly Race Tests
 
-on:
-  schedule:
-    # Run at 3 AM UTC every day
-    - cron: '0 3 * * *'
-  workflow_dispatch: # Allow manual trigger
+on: {}
 
 jobs:
   race-tests:

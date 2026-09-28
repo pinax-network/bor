@@ -488,7 +488,7 @@ func NewBlockChain(db ethdb.Database, genesis *Genesis, engine consensus.Engine,
 		milestoneFetcher:    cfg.MilestoneFetcher,
 	}
 
-	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
+	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped, bc.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -859,8 +859,17 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 		vtime    time.Duration
 	}
 
+	// Live tracers (including Firehose) are not safe with concurrent BlockSTM
+	// workers. Skip the parallel path entirely when a tracer is installed so
+	// we always run the serial processor with hooks active. (eth.backend also
+	// auto-disables ParallelEVM when VMTrace is set; this is defense-in-depth.)
+	useParallel := bc.parallelProcessor != nil && bc.cfg.VmConfig.Tracer == nil
+	if bc.parallelProcessor != nil && !useParallel {
+		log.Debug("Skipping BlockSTM parallel processor because a live tracer is active", "number", block.NumberU64())
+	}
+
 	var resultChanLen int = 2
-	if bc.enforceParallelProcessor {
+	if bc.enforceParallelProcessor && useParallel {
 		log.Debug("Processing block using Block STM only", "number", block.NumberU64())
 		resultChanLen = 1
 	}
@@ -869,7 +878,7 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 	processorCount := 0
 	execStart := time.Now()
 
-	if bc.parallelProcessor != nil {
+	if useParallel {
 		processorCount++
 
 		go func() {
@@ -901,7 +910,7 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 		}()
 	}
 
-	if bc.processor != nil && !bc.enforceParallelProcessor {
+	if bc.processor != nil && !(bc.enforceParallelProcessor && useParallel) {
 		processorCount++
 
 		go func() {
@@ -3523,7 +3532,11 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	}
 	if bc.logger != nil && bc.logger.OnBlockEnd != nil {
 		defer func() {
-			bc.logger.OnBlockEnd(blockEndErr)
+			if recovered := recover(); recovered != nil {
+				panic(recovered)
+			} else {
+				bc.logger.OnBlockEnd(blockEndErr)
+			}
 		}()
 	}
 

@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/core/tracing"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -18,7 +22,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/rlp"
 )
 
 type ChainContext struct {
@@ -81,6 +84,44 @@ func GetSystemMessage(toAddress common.Address, data []byte) Callmsg {
 	}
 }
 
+func getFirehose2CompatibleHash(spanID uint64, msg Callmsg) common.Hash {
+	var txHash common.Hash
+	sha := sha3.NewLegacyKeccak256().(crypto.KeccakState)
+	sha.Reset()
+	compatMsg := CompatCallMsg{
+		CompatEthCallMsg{
+			From:       msg.CallMsg.From,
+			To:         msg.CallMsg.To,
+			Gas:        msg.CallMsg.Gas,
+			GasPrice:   msg.CallMsg.GasPrice,
+			GasFeeCap:  msg.CallMsg.GasFeeCap,
+			GasTipCap:  msg.CallMsg.GasTipCap,
+			Value:      msg.CallMsg.Value,
+			Data:       msg.CallMsg.Data,
+			AccessList: msg.CallMsg.AccessList,
+		},
+	}
+	rlp.Encode(sha, []interface{}{spanID, compatMsg})
+	sha.Read(txHash[:])
+	return txHash
+}
+
+type CompatEthCallMsg struct {
+	From       common.Address   // the sender of the 'transaction'
+	To         *common.Address  // the destination contract (nil for contract creation)
+	Gas        uint64           // if 0, the call executes with near-infinite gas
+	GasPrice   *big.Int         // wei <-> gas exchange ratio
+	GasFeeCap  *big.Int         // EIP-1559 fee cap per gas.
+	GasTipCap  *big.Int         // EIP-1559 tip per gas.
+	Value      *big.Int         // amount of wei sent along with the call
+	Data       []byte           // input data, usually an ABI-encoded contract method invocation
+	AccessList types.AccessList // EIP-2930 access list.
+}
+type CompatCallMsg struct {
+	CompatEthCallMsg
+}
+
+// apply message
 func ApplyMessage(
 	_ context.Context,
 	msg Callmsg,
@@ -88,17 +129,39 @@ func ApplyMessage(
 	header *types.Header,
 	chainConfig *params.ChainConfig,
 	chainContext core.ChainContext,
-	vmConfig vm.Config,
+	tracer *tracing.Hooks,
+	spanID uint64,
 ) (uint64, error) {
 	initialGas := msg.Gas()
 
-	// Create a new context to be used in the EVM environment
 	blockContext := core.NewEVMBlockContext(header, chainContext, &header.Coinbase)
 
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
-	vmenv := vm.NewEVM(blockContext, state, chainConfig, vmConfig)
-	vmenv.SetTxContext(core.NewEVMTxContextForStateSync())
+	vmenv := vm.NewEVM(blockContext, state, chainConfig, vm.Config{Tracer: tracer})
+
+	var tx *types.Transaction
+	if tracer != nil {
+		tx = types.NewTx(&types.LegacyTx{
+			Nonce:    msg.Nonce(),
+			GasPrice: msg.GasPrice(),
+			Gas:      msg.Gas(),
+			To:       msg.To(),
+			Value:    msg.Value(),
+			Data:     msg.Data(),
+		})
+
+		switch {
+		case tracer.OnTxStartWithHash != nil: // firehose has this hook that allows forcing a hash to some special system transactions
+			txHash := getFirehose2CompatibleHash(spanID, msg)
+			tracer.OnTxStartWithHash(vmenv.GetVMContext(), tx, msg.From(), txHash)
+		case tracer.OnTxStart != nil:
+			tracer.OnTxStart(vmenv.GetVMContext(), tx, msg.From())
+		}
+		state.Inner().SetTxContext(tx.Hash(), 0)
+	} else {
+		vmenv.SetTxContext(core.NewEVMTxContextForStateSync())
+	}
 
 	// nolint : contextcheck
 	// Apply the transaction to the current state (included in the env)
@@ -131,6 +194,26 @@ func ApplyMessage(
 	}
 
 	gasUsed := initialGas - gasLeft
+
+	if tracer != nil {
+		blockHash := header.Hash()
+		cumulativeGasUsed := gasUsed
+
+		receipt := types.NewReceipt(nil, err != nil, cumulativeGasUsed)
+		receipt.TxHash = tx.Hash()
+		receipt.GasUsed = gasUsed
+
+		if msg.To() == nil {
+			receipt.ContractAddress = crypto.CreateAddress(vmenv.TxContext.Origin, tx.Nonce())
+		}
+
+		receipt.Logs = state.GetLogs(tx.Hash(), header.Number.Uint64(), blockHash, header.Time)
+		receipt.Bloom = types.CreateBloom(receipt)
+		receipt.BlockHash = blockHash
+		receipt.BlockNumber = header.Number
+		receipt.TransactionIndex = 0
+		tracer.OnTxEnd(receipt, nil)
+	}
 
 	return gasUsed, nil
 }

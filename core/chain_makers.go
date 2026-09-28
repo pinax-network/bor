@@ -25,6 +25,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/beacon"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
@@ -777,5 +778,14 @@ func (cm *chainMaker) GetBlock(hash common.Hash, number uint64) *types.Block {
 }
 
 func (cm *chainMaker) GetTd(hash common.Hash, number uint64) *big.Int {
-	return nil // not supported
+	// Allows tests to pass with beacon consensus engine. Only report a total
+	// difficulty when the chain actually has a terminal one to compare against:
+	// beacon.IsTTDReached dereferences TerminalTotalDifficulty as soon as the TD
+	// is non-nil, so a pre-merge config would panic there. Returning nil instead
+	// makes it report ErrUnknownAncestor and fall back to the legacy rules.
+	if _, ok := cm.engine.(*beacon.Beacon); ok && cm.config.TerminalTotalDifficulty != nil {
+		return new(big.Int)
+	}
+
+	return nil
 }

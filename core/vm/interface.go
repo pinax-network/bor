@@ -112,4 +112,10 @@ type StateDB interface {
 
 	// Inner returns the underlying state instance. Needed for bor consensus.
 	Inner() *state.StateDB
+
+	// Firehose Requirements
+
+	// GetLogs is needed for Firehose within Polygon Bor consensus engine where on [bor.ApplyMessage]
+	// we need to make a receipt and as such, retrieve the logs.
+	GetLogs(txHash common.Hash, blockNumber uint64, blockHash common.Hash, blockTime uint64) []*types.Log
 }

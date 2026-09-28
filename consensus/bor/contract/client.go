@@ -4,6 +4,8 @@ import (
 	"context"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/core/tracing"
+
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -51,7 +53,7 @@ func (gc *GenesisContractsClient) CommitState(
 	state vm.StateDB,
 	header *types.Header,
 	chCtx statefull.ChainContext,
-	vmCfg vm.Config,
+	tracer *tracing.Hooks,
 ) (uint64, error) {
 	eventRecord := event.BuildEventRecord()
 
@@ -74,7 +76,7 @@ func (gc *GenesisContractsClient) CommitState(
 
 	log.Info("→ committing new state", "eventRecord", event.ID)
 
-	gasUsed, err := statefull.ApplyMessage(context.Background(), msg, state, header, gc.chainConfig, chCtx, vmCfg)
+	gasUsed, err := statefull.ApplyMessage(context.Background(), msg, state, header, gc.chainConfig, chCtx, tracer, 0)
 
 	// Logging event log with time and individual gasUsed
 	log.Info("→ committed new state", "eventRecord", event.String(gasUsed))
