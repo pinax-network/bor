@@ -1109,10 +1109,11 @@ func (bc *BlockChain) loadLastState() error {
 	bc.currentSnapBlock.Store(headBlock.Header())
 	headFastBlockGauge.Update(int64(headBlock.NumberU64()))
 
+	// Resolve the snap head by header: below a history cutoff it has no body.
 	if head := rawdb.ReadHeadFastBlockHash(bc.db); head != (common.Hash{}) {
-		if block := bc.GetBlockByHash(head); block != nil {
-			bc.currentSnapBlock.Store(block.Header())
-			headFastBlockGauge.Update(int64(block.NumberU64()))
+		if header := bc.GetHeaderByHash(head); header != nil {
+			bc.currentSnapBlock.Store(header)
+			headFastBlockGauge.Update(int64(header.Number.Uint64()))
 		}
 	}
 
