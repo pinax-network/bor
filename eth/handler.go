@@ -268,6 +268,9 @@ func newHandler(config *handlerConfig) (*handler, error) {
 
 	// Construct the downloader (long sync)
 	h.downloader = downloader.New(config.Database, h.eventMux, h.chain, nil, h.removePeer, h.enableSyncedFeatures, config.checker, config.fastForwardThreshold, config.syncAndProduceWitnesses)
+	if number, hash := h.chain.HistoryPruningCutoff(); number != 0 {
+		h.downloader.SetChainCutoff(number, hash)
+	}
 	if ttd := h.chain.Config().TerminalTotalDifficulty; ttd != nil {
 		head := h.chain.CurrentBlock()
 		if td := h.chain.GetTd(head.Hash(), head.Number.Uint64()); td.Cmp(ttd) >= 0 {

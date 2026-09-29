@@ -125,6 +125,12 @@ type Config struct {
 	// HistoryMode configures chain history retention.
 	HistoryMode history.HistoryMode
 
+	// HistoryCutoffNumber and HistoryCutoffHash set a custom chain history
+	// cutoff: snap sync stores headers only below this block and never fetches
+	// that segment's bodies or receipts. Zero disables it.
+	HistoryCutoffNumber uint64
+	HistoryCutoffHash   common.Hash
+
 	// This can be set to list of enrtree:// URLs which will be queried for
 	// nodes to connect to.
 	EthDiscoveryURLs  []string

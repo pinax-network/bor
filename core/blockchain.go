@@ -232,6 +232,13 @@ type BlockChainConfig struct {
 	// Blocks before this number may be unavailable in the chain database.
 	ChainHistoryMode history.HistoryMode
 
+	// HistoryCutoff, when set, is a custom history pruning point: blocks below
+	// it have headers only (no bodies or receipts). Snap sync then never fetches
+	// that segment's bodies or receipts. It takes precedence over
+	// ChainHistoryMode's predefined points and requires a fresh database or one
+	// already pruned to exactly this block.
+	HistoryCutoff *history.PrunePoint
+
 	// Misc options
 	NoPrefetch bool            // Whether to disable heuristic state prefetching when processing blocks
 	Overrides  *ChainOverrides // Optional chain config overrides
@@ -1157,6 +1164,20 @@ func (bc *BlockChain) loadLastState() error {
 func (bc *BlockChain) initializeHistoryPruning(latest uint64) error {
 	freezerTail, _ := bc.db.Tail()
 
+	if pt := bc.cfg.HistoryCutoff; pt != nil {
+		switch {
+		case freezerTail == pt.BlockNumber:
+			// Already pruned to the configured cutoff.
+		case freezerTail == 0 && latest == 0:
+			// Fresh database: snap sync will store headers only below the cutoff.
+		default:
+			log.Error("Configured history cutoff does not match the database", "cutoff", pt.BlockNumber, "tail", freezerTail, "latest", latest)
+			return errors.New("history cutoff requires a fresh database or one pruned to the cutoff")
+		}
+		bc.historyPrunePoint.Store(pt)
+		return nil
+	}
+
 	switch bc.cfg.ChainHistoryMode {
 	case history.KeepAll:
 		if freezerTail == 0 {
@@ -1197,6 +1218,84 @@ func (bc *BlockChain) initializeHistoryPruning(latest uint64) error {
 	default:
 		return fmt.Errorf("invalid history mode: %d", bc.cfg.ChainHistoryMode)
 	}
+}
+
+// InsertHeadersBeforeCutoff inserts the given headers into the ancient store as
+// they are older than the configured chain cutoff. Block bodies, receipts and
+// bor receipts are stored empty and then truncated from the freezer tail, so
+// only headers, hashes and the last header's total difficulty remain below the
+// cutoff. All inserted headers are regarded as canonical; reorgs below the
+// cutoff are not supported. Ported from go-ethereum's snap sync history cutoff,
+// adapted for bor's total difficulty and bor receipt tables.
+func (bc *BlockChain) InsertHeadersBeforeCutoff(headers []*types.Header) (int, error) {
+	if len(headers) == 0 {
+		return 0, nil
+	}
+	if n, err := bc.hc.ValidateHeaderChain(headers); err != nil {
+		return n, err
+	}
+	if !bc.chainmu.TryLock() {
+		return 0, errChainStopped
+	}
+	defer bc.chainmu.Unlock()
+
+	// Initialize the ancient store with the genesis block if it is empty.
+	var (
+		frozen, _ = bc.db.ItemAmountInAncient()
+		first     = headers[0].Number.Uint64()
+	)
+	if first == 1 && frozen == 0 {
+		td := bc.genesisBlock.Difficulty()
+		if _, err := rawdb.WriteAncientBlocks(bc.db, []*types.Block{bc.genesisBlock}, []rlp.RawValue{rlp.EmptyList}, []rlp.RawValue{rlp.EmptyList}, td); err != nil {
+			log.Error("Error writing genesis to ancients", "err", err)
+			return 0, err
+		}
+		log.Info("Wrote genesis to ancient store")
+	} else if frozen != first {
+		return 0, fmt.Errorf("headers are gapped with the ancient store, first: %d, ancient: %d", first, frozen)
+	}
+	// Total difficulty continues from the parent, which is the last ancient item
+	// (or genesis) and still readable because only its successors are pruned.
+	parentTd := bc.GetTd(headers[0].ParentHash, first-1)
+	if parentTd == nil {
+		return 0, fmt.Errorf("total difficulty of block %d is unavailable", first-1)
+	}
+	firstTd := new(big.Int).Add(parentTd, headers[0].Difficulty)
+	if _, err := rawdb.WriteAncientHeaderChain(bc.db, headers, firstTd); err != nil {
+		return 0, err
+	}
+	// Sync the ancient store explicitly to ensure all data has been flushed to disk.
+	if err := bc.db.SyncAncient(); err != nil {
+		return 0, err
+	}
+	last := headers[len(headers)-1]
+	lastTd := new(big.Int).Set(firstTd)
+	for _, header := range headers[1:] {
+		lastTd.Add(lastTd, header.Difficulty)
+	}
+	batch := bc.db.NewBatch()
+	for _, header := range headers {
+		rawdb.WriteHeaderNumber(batch, header.Hash(), header.Number.Uint64())
+	}
+	// Keep the last header's total difficulty in the key-value store: its freezer
+	// copy is truncated below, and the first block after it needs its parent's TD.
+	rawdb.WriteTd(batch, last.Hash(), last.Number.Uint64(), lastTd)
+	rawdb.WriteHeadHeaderHash(batch, last.Hash())
+	rawdb.WriteHeadFastBlockHash(batch, last.Hash())
+	if err := batch.Write(); err != nil {
+		return 0, err
+	}
+	// Truncate the useless chain segment (empty bodies and receipts) in the
+	// ancient store; headers and hashes are not prunable and remain.
+	if _, err := bc.db.TruncateTail(last.Number.Uint64() + 1); err != nil {
+		return 0, err
+	}
+	// Last step update all in-memory markers
+	bc.hc.currentHeader.Store(last)
+	bc.currentSnapBlock.Store(last)
+	headHeaderGauge.Update(last.Number.Int64())
+	headFastBlockGauge.Update(last.Number.Int64())
+	return 0, nil
 }
 
 // SetHead rewinds the local chain to a new head. Depending on whether the node

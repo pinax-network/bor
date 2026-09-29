@@ -38,6 +38,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/filtermaps"
+	"github.com/ethereum/go-ethereum/core/history"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state/pruner"
 	"github.com/ethereum/go-ethereum/core/txpool"
@@ -339,6 +340,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			StateScheme:       scheme,
 			TriesInMemory:     config.TriesInMemory,
 			ChainHistoryMode:  config.HistoryMode,
+			HistoryCutoff:     historyCutoff(config),
 			TxLookupLimit:     int64(min(config.TransactionHistory, math.MaxInt64)),
 			AddressCacheSizes: config.AddressCacheSizes,
 			PreloadRateLimit:  config.PreloadRateLimit,
@@ -735,6 +737,15 @@ func (s *Ethereum) SetAuthorized(authorized bool) {
 	s.lock.Lock()
 	s.authorized = authorized
 	s.lock.Unlock()
+}
+
+// historyCutoff returns the custom chain history cutoff configured in config,
+// or nil when none is set.
+func historyCutoff(config *ethconfig.Config) *history.PrunePoint {
+	if config.HistoryCutoffNumber == 0 {
+		return nil
+	}
+	return &history.PrunePoint{BlockNumber: config.HistoryCutoffNumber, BlockHash: config.HistoryCutoffHash}
 }
 
 // Protocols returns all the currently configured

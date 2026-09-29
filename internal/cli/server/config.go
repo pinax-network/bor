@@ -190,6 +190,12 @@ type HistoryConfig struct {
 	// StateHistory denotes number of recent blocks to retain state history for (only relevant
 	// in state.scheme=path)
 	StateHistory uint64 `hcl:"state,block" toml:"state,block"`
+
+	// CutoffNumber and CutoffHash set a custom chain history cutoff: snap sync
+	// stores only headers below this block and never downloads that segment's
+	// bodies or receipts. Zero disables it. Requires a fresh database.
+	CutoffNumber uint64 `hcl:"cutoff.number,optional" toml:"cutoff.number,optional"`
+	CutoffHash   string `hcl:"cutoff.hash,optional" toml:"cutoff.hash,optional"`
 }
 
 type HealthConfig struct {
@@ -1611,6 +1617,14 @@ func (c *Config) buildEth(stack *node.Node, accountManager *accounts.Manager) (*
 		n.LogHistory = c.History.LogHistory
 		n.LogNoHistory = c.History.LogNoHistory
 		n.StateHistory = c.History.StateHistory
+
+		if c.History.CutoffNumber != 0 {
+			if !common.IsHexHash(c.History.CutoffHash) {
+				return nil, fmt.Errorf("history.cutoff.hash must be the 32-byte hash of block %d, got %q", c.History.CutoffNumber, c.History.CutoffHash)
+			}
+			n.HistoryCutoffNumber = c.History.CutoffNumber
+			n.HistoryCutoffHash = common.HexToHash(c.History.CutoffHash)
+		}
 	}
 
 	// LevelDB

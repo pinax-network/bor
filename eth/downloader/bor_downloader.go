@@ -18,6 +18,7 @@
 package downloader
 
 import (
+	"sort"
 	"errors"
 	"fmt"
 	"math/big"
@@ -134,6 +135,11 @@ type Downloader struct {
 	committed       atomic.Bool
 	ancientLimit    uint64 // The maximum block number which can be regarded as ancient data.
 
+	// Chain history cutoff: in snap sync, headers below chainCutoffNumber are
+	// stored without bodies or receipts, which are never fetched. Zero disables it.
+	chainCutoffNumber uint64
+	chainCutoffHash   common.Hash
+
 	// Channels
 	headerProcCh chan *headerTask // Channel to feed the header processor new tasks
 
@@ -238,6 +244,10 @@ type BlockChain interface {
 	// InsertReceiptChain inserts a batch of receipts into the local chain.
 	InsertReceiptChain(types.Blocks, []rlp.RawValue, uint64) (int, error)
 
+	// InsertHeadersBeforeCutoff inserts headers below the configured chain
+	// cutoff into the ancient store, without block bodies or receipts.
+	InsertHeadersBeforeCutoff([]*types.Header) (int, error)
+
 	// Snapshots returns the blockchain snapshot tree to paused it during sync.
 	Snapshots() *snapshot.Tree
 
@@ -246,6 +256,15 @@ type BlockChain interface {
 	// TrieDB retrieves the low level trie database used for interacting
 	// with trie nodes.
 	TrieDB() *triedb.Database
+}
+
+// SetChainCutoff configures the chain history cutoff for snap sync. Headers
+// below number are stored without bodies or receipts, and those are never
+// requested from peers. This lets snap sync skip chain segments that peers
+// cannot serve, such as Amoy blocks whose receipts exceed the RLPx message
+// limit. The header at number must match hash. A zero number disables it.
+func (d *Downloader) SetChainCutoff(number uint64, hash common.Hash) {
+	d.chainCutoffNumber, d.chainCutoffHash = number, hash
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
@@ -756,6 +775,12 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td, ttd *
 			}
 		}
 
+		// Extend the ancient chain segment range if the ancient limit is even
+		// below the configured chain cutoff.
+		if d.chainCutoffNumber != 0 && d.chainCutoffNumber > d.ancientLimit {
+			d.ancientLimit = d.chainCutoffNumber
+			log.Info("Extend the ancient range with configured cutoff", "cutoff", d.chainCutoffNumber)
+		}
 		frozen, _ := d.stateDB.ItemAmountInAncient() // Ignore the error here since light client can also hit here.
 
 		// If a part of blockchain data has already been written into active store,
@@ -781,7 +806,14 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td, ttd *
 	if mode == StatelessSync && needsBytecodeSync {
 		queueMode = SnapSync
 	}
-	d.queue.Prepare(origin+1, queueMode)
+	// Skip the chain segment before a configured cutoff in snap sync: its bodies
+	// and receipts are neither fetched nor stored, only its headers.
+	chainOffset := origin + 1
+	if mode == SnapSync && d.chainCutoffNumber != 0 && chainOffset < d.chainCutoffNumber {
+		chainOffset = d.chainCutoffNumber
+		log.Info("Skip chain segment before cutoff", "origin", origin, "cutoff", d.chainCutoffNumber)
+	}
+	d.queue.Prepare(chainOffset, queueMode)
 
 	if d.syncInitHook != nil {
 		d.syncInitHook(origin, height)
@@ -798,8 +830,8 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td, ttd *
 
 	fetchers := []func() error{
 		headerFetcher, // Headers are always retrieved
-		func() error { return d.fetchBodies(origin+1, beaconMode) },   // Bodies are retrieved during normal and snap sync
-		func() error { return d.fetchReceipts(origin+1, beaconMode) }, // Receipts are retrieved during snap sync
+		func() error { return d.fetchBodies(chainOffset, beaconMode) },   // Bodies are retrieved during normal and snap sync
+		func() error { return d.fetchReceipts(chainOffset, beaconMode) }, // Receipts are retrieved during snap sync
 		func() error { return d.processHeaders(origin+1, td, ttd, beaconMode) },
 	}
 
@@ -1722,6 +1754,28 @@ func (d *Downloader) processHeaders(origin uint64, td, ttd *big.Int, beaconMode 
 
 				chunkHeaders := headers[:limit]
 				chunkHashes := hashes[:limit]
+				chunkOrigin := origin
+
+				// Split the headers around the chain cutoff: headers below it go
+				// straight into the ancient store without bodies or receipts, and
+				// only the rest are scheduled for content retrieval.
+				if mode == SnapSync && d.chainCutoffNumber != 0 {
+					cutoff := sort.Search(len(chunkHeaders), func(i int) bool {
+						return chunkHeaders[i].Number.Uint64() >= d.chainCutoffNumber
+					})
+					if cutoff < len(chunkHeaders) && chunkHeaders[cutoff].Number.Uint64() == d.chainCutoffNumber && chunkHashes[cutoff] != d.chainCutoffHash {
+						return fmt.Errorf("%w: header at chain cutoff %d mismatched, want %v, got %v", errInvalidChain, d.chainCutoffNumber, d.chainCutoffHash, chunkHashes[cutoff])
+					}
+					if cutoff > 0 {
+						if n, err := d.blockchain.InsertHeadersBeforeCutoff(chunkHeaders[:cutoff]); err != nil {
+							log.Warn("Failed to insert ancient header chain", "number", chunkHeaders[n].Number, "hash", chunkHashes[n], "parent", chunkHeaders[n].ParentHash, "err", err)
+							return fmt.Errorf("%w: %v", errInvalidChain, err)
+						}
+						log.Debug("Inserted headers before cutoff", "number", chunkHeaders[cutoff-1].Number, "hash", chunkHashes[cutoff-1])
+						chunkHeaders, chunkHashes = chunkHeaders[cutoff:], chunkHashes[cutoff:]
+						chunkOrigin += uint64(cutoff)
+					}
+				}
 
 				// In case of header only syncing, validate the chunk immediately
 				if mode == SnapSync {
@@ -1733,7 +1787,7 @@ func (d *Downloader) processHeaders(origin uint64, td, ttd *big.Int, beaconMode 
 						td       *big.Int
 					)
 
-					if !beaconMode && ttd != nil {
+					if !beaconMode && ttd != nil && len(chunkHeaders) > 0 {
 						td = d.blockchain.GetTd(chunkHeaders[0].ParentHash, chunkHeaders[0].Number.Uint64()-1)
 						if td == nil {
 							// This should never really happen, but handle gracefully for now
@@ -1785,9 +1839,11 @@ func (d *Downloader) processHeaders(origin uint64, td, ttd *big.Int, beaconMode 
 						}
 					}
 					// Otherwise insert the headers for content retrieval
-					inserts := d.queue.Schedule(chunkHeaders, chunkHashes, origin)
-					if len(inserts) != len(chunkHeaders) {
-						return fmt.Errorf("%w: stale headers", errBadPeer)
+					if len(chunkHeaders) > 0 {
+						inserts := d.queue.Schedule(chunkHeaders, chunkHashes, chunkOrigin)
+						if len(inserts) != len(chunkHeaders) {
+							return fmt.Errorf("%w: stale headers", errBadPeer)
+						}
 					}
 				}
 

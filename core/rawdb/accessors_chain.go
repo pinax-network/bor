@@ -911,6 +911,42 @@ func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts 
 	})
 }
 
+// WriteAncientHeaderChain writes the supplied headers into the ancient store
+// with empty block bodies, receipts and bor receipts, so every freezer table
+// stays aligned. It is used for the chain segment before a configured history
+// cutoff, whose bodies and receipts are never downloaded. td is the total
+// difficulty of the first header; each later header adds its own difficulty.
+func WriteAncientHeaderChain(db ethdb.AncientWriter, headers []*types.Header, td *big.Int) (int64, error) {
+	tdSum := new(big.Int).Set(td)
+	return db.ModifyAncients(func(op ethdb.AncientWriteOp) error {
+		for i, header := range headers {
+			num := header.Number.Uint64()
+			if i > 0 {
+				tdSum.Add(tdSum, header.Difficulty)
+			}
+			if err := op.AppendRaw(ChainFreezerHashTable, num, header.Hash().Bytes()); err != nil {
+				return fmt.Errorf("can't add block %d hash: %v", num, err)
+			}
+			if err := op.Append(ChainFreezerHeaderTable, num, header); err != nil {
+				return fmt.Errorf("can't append block header %d: %v", num, err)
+			}
+			if err := op.AppendRaw(ChainFreezerBodiesTable, num, nil); err != nil {
+				return fmt.Errorf("can't append block body %d: %v", num, err)
+			}
+			if err := op.AppendRaw(ChainFreezerReceiptTable, num, nil); err != nil {
+				return fmt.Errorf("can't append block %d receipts: %v", num, err)
+			}
+			if err := op.AppendRaw(freezerBorReceiptTable, num, nil); err != nil {
+				return fmt.Errorf("can't append block %d bor receipts: %v", num, err)
+			}
+			if err := op.Append(ChainFreezerDifficultyTable, num, tdSum); err != nil {
+				return fmt.Errorf("can't append block %d total difficulty: %v", num, err)
+			}
+		}
+		return nil
+	})
+}
+
 func writeAncientBlock(op ethdb.AncientWriteOp, block *types.Block, header *types.Header, receipt, borReceipt rlp.RawValue, td *big.Int) error {
 	num := block.NumberU64()
 	if err := op.AppendRaw(ChainFreezerHashTable, num, block.Hash().Bytes()); err != nil {
