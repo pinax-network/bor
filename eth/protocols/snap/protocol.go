@@ -43,7 +43,13 @@ var ProtocolVersions = []uint{SNAP1}
 var protocolLengths = map[uint]uint64{SNAP1: 8}
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
-const maxMessageSize = 10 * 1024 * 1024
+//
+// 16 MiB instead of upstream's 10 MiB: a node snap syncing Amoy needs responses
+// for old blocks (around #34.5M) that peers answer with 11-14 MB messages, and a
+// 10 MiB cap drops every peer that serves them, so sync can never progress. It
+// stays below RLPx's 16,777,215-byte frame limit, and it only raises what this
+// node accepts; peers still cap their own inbound messages.
+const maxMessageSize = 16 * 1024 * 1024
 
 const (
 	GetAccountRangeMsg  = 0x00

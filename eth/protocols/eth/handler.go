@@ -221,7 +221,7 @@ func handleMessage(backend Backend, peer *Peer) error {
 		}
 	}
 	if uint64(msg.Size) > maxSize {
-		return fmt.Errorf("%w: %v > %v", errMsgTooLarge, msg.Size, maxSize)
+		return fmt.Errorf("%w: %v > %v (msg code 0x%02x)", errMsgTooLarge, msg.Size, maxSize, msg.Code)
 	}
 	if msg.Code != NewBlockHashesMsg {
 		if err := peer.checkMessageRate(msg.Code, msg.Size, time.Now()); err != nil {
