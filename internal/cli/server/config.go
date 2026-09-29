@@ -1618,6 +1618,18 @@ func (c *Config) buildEth(stack *node.Node, accountManager *accounts.Manager) (*
 		n.LogNoHistory = c.History.LogNoHistory
 		n.StateHistory = c.History.StateHistory
 
+		// The cutoff can also come from the environment, so a package can set it
+		// in its service unit without changing a config shared by other hosts.
+		if c.History.CutoffNumber == 0 {
+			if v := os.Getenv("BOR_HISTORY_CUTOFF_NUMBER"); v != "" {
+				n, err := strconv.ParseUint(v, 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("BOR_HISTORY_CUTOFF_NUMBER: %v", err)
+				}
+				c.History.CutoffNumber = n
+				c.History.CutoffHash = os.Getenv("BOR_HISTORY_CUTOFF_HASH")
+			}
+		}
 		if c.History.CutoffNumber != 0 {
 			if b := common.FromHex(c.History.CutoffHash); len(b) != common.HashLength {
 				return nil, fmt.Errorf("history.cutoff.hash must be the 32-byte hash of block %d, got %q", c.History.CutoffNumber, c.History.CutoffHash)

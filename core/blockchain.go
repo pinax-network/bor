@@ -1165,13 +1165,15 @@ func (bc *BlockChain) initializeHistoryPruning(latest uint64) error {
 	freezerTail, _ := bc.db.Tail()
 
 	if pt := bc.cfg.HistoryCutoff; pt != nil {
+		frozen, _ := bc.db.ItemAmountInAncient()
 		switch {
-		case freezerTail == pt.BlockNumber:
-			// Already pruned to the configured cutoff.
-		case freezerTail == 0 && latest == 0:
+		case freezerTail > 0 && freezerTail <= pt.BlockNumber:
+			// Pruned to the cutoff, or a cutoff snap sync still writing headers
+			// (each batch truncates the tail to just past its last header).
+		case freezerTail == 0 && frozen == 0 && latest == 0:
 			// Fresh database: snap sync will store headers only below the cutoff.
 		default:
-			log.Error("Configured history cutoff does not match the database", "cutoff", pt.BlockNumber, "tail", freezerTail, "latest", latest)
+			log.Error("Configured history cutoff does not match the database", "cutoff", pt.BlockNumber, "tail", freezerTail, "ancients", frozen, "latest", latest)
 			return errors.New("history cutoff requires a fresh database or one pruned to the cutoff")
 		}
 		bc.historyPrunePoint.Store(pt)

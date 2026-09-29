@@ -91,6 +91,14 @@ func TestInsertHeadersBeforeCutoff(t *testing.T) {
 	if _, err := chain.InsertHeadersBeforeCutoff(headers[:10]); err != nil {
 		t.Fatalf("failed to insert first header batch before cutoff: %v", err)
 	}
+	// A restart in the middle of a cutoff sync must be accepted: the freezer tail
+	// is then just past the last header written, below the cutoff.
+	chain.Stop()
+	db.Close()
+	db = openCutoffTestDB(t, datadir)
+	if chain, err = NewBlockChain(db, gspec, ethash.NewFaker(), cutoffTestConfig(point)); err != nil {
+		t.Fatalf("failed to reopen chain in the middle of a cutoff sync: %v", err)
+	}
 	if _, err := chain.InsertHeadersBeforeCutoff(headers[10 : cutoff-1]); err != nil {
 		t.Fatalf("failed to insert second header batch before cutoff: %v", err)
 	}
