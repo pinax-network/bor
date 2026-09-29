@@ -63,6 +63,7 @@ type chainSyncer struct {
 	forced      bool // true when force timer fired
 	warned      time.Time
 	declined    time.Time // last time a declined snap sync attempt was logged
+	unranked    time.Time // last time a sync toward a peer without a TD was logged
 	peerEventCh chan struct{}
 	doneCh      chan error // non-nil when sync is running
 
@@ -268,6 +269,20 @@ func (cs *chainSyncer) nextSyncOp() (*chainSyncOp, time.Duration) {
 	}
 
 	if op.td.Cmp(ourTD) <= 0 {
+		// A peer that reports no total difficulty cannot be ranked against our
+		// own, but a node that is still snap syncing is by definition behind the
+		// network. Sync toward the peer's advertised head rather than waiting
+		// forever for a peer with a higher TD: on Polygon mainnet every peer can
+		// report TD 0, which otherwise leaves snap sync pending indefinitely. If
+		// the peer is not actually ahead, the sync fails and the downloader backs
+		// the peer off, so the next cycle tries another one.
+		if cs.syncToUnrankedPeer(mode, op) {
+			if time.Since(cs.unranked) >= syncDeclineLogInterval {
+				cs.unranked = time.Now()
+				log.Info("Snap syncing to a peer that reports no total difficulty", "peer", peer.ID(), "head", op.head, "localTD", ourTD)
+			}
+			return op, 0
+		}
 		cs.logDeclined("no peer has a higher total difficulty", "mode", mode, "localTD", ourTD, "bestPeerTD", op.td, "bestPeer", peer.ID())
 
 		// We seem to be in sync according to the legacy rules. In the merge
@@ -294,6 +309,16 @@ func (cs *chainSyncer) logDeclined(reason string, ctx ...interface{}) {
 	}
 	cs.declined = time.Now()
 	log.Warn("Snap sync pending but no sync cycle started", append([]interface{}{"reason", reason}, ctx...)...)
+}
+
+// syncToUnrankedPeer reports whether a sync cycle should start toward a peer
+// whose total difficulty is unknown (reported as zero). It only applies while
+// snap sync is still pending and the peer has advertised a head to sync to.
+func (cs *chainSyncer) syncToUnrankedPeer(mode downloader.SyncMode, op *chainSyncOp) bool {
+	return mode == downloader.SnapSync &&
+		cs.handler.snapSync.Load() &&
+		(op.td == nil || op.td.Sign() == 0) &&
+		op.head != (common.Hash{})
 }
 
 func peerToSyncOp(mode downloader.SyncMode, p *eth.Peer) *chainSyncOp {

@@ -17,11 +17,13 @@
 package eth
 
 import (
+	crand "crypto/rand"
 	"errors"
 	"math/big"
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -523,5 +525,90 @@ func testSnapSyncDisabling(t *testing.T, ethVer uint, snapVer uint) {
 				return
 			}
 		}
+	}
+}
+
+// registerPeerWithHead registers an eth/68 peer that advertises the given head
+// and total difficulty, as a peer that reports no total difficulty does.
+func registerPeerWithHead(t *testing.T, ps *peerSet, head common.Hash, td *big.Int) *eth.Peer {
+	t.Helper()
+
+	app, net := p2p.MsgPipe()
+	t.Cleanup(func() {
+		app.Close()
+		net.Close()
+	})
+
+	var id enode.ID
+	if _, err := crand.Read(id[:]); err != nil {
+		t.Fatalf("failed to create peer id: %v", err)
+	}
+
+	peer := eth.NewPeer(eth.ETH68, p2p.NewPeer(id, "test", nil), net, nil)
+	peer.SetHead(head, td)
+	t.Cleanup(peer.Close)
+
+	if err := ps.registerPeer(peer, nil, nil); err != nil {
+		t.Fatalf("failed to register peer: %v", err)
+	}
+	return peer
+}
+
+// Tests that a node still snap syncing starts a sync cycle toward a peer that
+// reports no total difficulty, instead of declining forever.
+func TestChainSyncerSnapSyncsToZeroTDPeer(t *testing.T) {
+	handler, cleanup := newChainSyncerTestHandler(t)
+	defer cleanup()
+
+	if !handler.snapSync.Load() {
+		t.Fatal("test handler should start with snap sync pending")
+	}
+	syncer := newChainSyncer(handler)
+	syncer.forced = true // a single peer is enough, as on a force-sync cycle
+
+	peer := registerPeerWithHead(t, handler.peers, common.Hash{0x42}, big.NewInt(0))
+	if err := handler.downloader.RegisterPeer(peer.ID(), eth.ETH68, &ethPeer{Peer: peer}); err != nil {
+		t.Fatal(err)
+	}
+
+	op, wait := syncer.nextSyncOp()
+	if op == nil {
+		t.Fatal("expected a sync operation toward the zero-TD peer")
+	}
+	if op.peer.ID() != peer.ID() || op.head != (common.Hash{0x42}) || op.mode != downloader.SnapSync {
+		t.Fatalf("sync op mismatch: peer %v head %x mode %v", op.peer.ID(), op.head, op.mode)
+	}
+	if wait != 0 {
+		t.Fatalf("sync wait mismatch: have %v, want 0", wait)
+	}
+}
+
+// Tests that the zero-TD fallback does not apply once snap sync has completed,
+// or when the peer has not advertised a head.
+func TestChainSyncerZeroTDPeerFallbackLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		snapSync bool
+		head     common.Hash
+	}{
+		{"snap sync done", false, common.Hash{0x42}},
+		{"no advertised head", true, common.Hash{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, cleanup := newChainSyncerTestHandler(t)
+			defer cleanup()
+
+			handler.snapSync.Store(tc.snapSync)
+			syncer := newChainSyncer(handler)
+			syncer.forced = true
+
+			peer := registerPeerWithHead(t, handler.peers, tc.head, big.NewInt(0))
+			if err := handler.downloader.RegisterPeer(peer.ID(), eth.ETH68, &ethPeer{Peer: peer}); err != nil {
+				t.Fatal(err)
+			}
+			if op, _ := syncer.nextSyncOp(); op != nil {
+				t.Fatalf("expected no sync op, got peer %v head %x", op.peer.ID(), op.head)
+			}
+		})
 	}
 }
