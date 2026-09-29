@@ -47,7 +47,14 @@ var ProtocolVersions = []uint{ETH69, ETH68}
 var protocolLengths = map[uint]uint64{ETH68: 17, ETH69: 18}
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
-const maxMessageSize = 10 * 1024 * 1024
+//
+// Just under 16 MiB instead of upstream's 10 MiB: a node snap syncing Amoy needs responses
+// for old blocks (around #34.5M) that peers answer with 11-14 MB messages, and a
+// 10 MiB cap drops every peer that serves them, so sync can never progress. It is
+// the largest size RLPx can carry (its frame length is a 24-bit field and it
+// rejects larger uncompressed messages), and it only raises what this node
+// accepts; peers still cap their own inbound messages.
+const maxMessageSize = 1<<24 - 1
 
 const (
 	StatusMsg                     = 0x00
