@@ -1398,6 +1398,18 @@ func (c *Command) Flags(config *Config) *flagset.Flagset {
 		Value:   &c.cliConfig.History.StateHistory,
 		Default: c.cliConfig.History.StateHistory,
 	})
+	f.Uint64Flag(&flagset.Uint64Flag{
+		Name:    "history.cutoff.number",
+		Usage:   "Chain history cutoff block: snap sync stores only headers below it and never downloads their bodies or receipts (0 = disabled; requires a fresh database)",
+		Value:   &c.cliConfig.History.CutoffNumber,
+		Default: c.cliConfig.History.CutoffNumber,
+	})
+	f.StringFlag(&flagset.StringFlag{
+		Name:    "history.cutoff.hash",
+		Usage:   "Hash of the history.cutoff.number block, used to verify the header at the cutoff",
+		Value:   &c.cliConfig.History.CutoffHash,
+		Default: c.cliConfig.History.CutoffHash,
+	})
 
 	// Health check related flags
 	f.IntFlag(&flagset.IntFlag{
