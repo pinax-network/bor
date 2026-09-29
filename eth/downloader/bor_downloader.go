@@ -19,10 +19,10 @@ package downloader
 
 import (
 	"context"
-	"sort"
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
