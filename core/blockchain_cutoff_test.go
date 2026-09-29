@@ -59,7 +59,7 @@ func TestInsertHeadersBeforeCutoff(t *testing.T) {
 		total  = 64
 		cutoff = 32 // first block that keeps its body and receipts
 	)
-	gspec := &Genesis{BaseFee: big.NewInt(params.InitialBaseFee), Config: params.AllEthashProtocolChanges}
+	gspec := &Genesis{BaseFee: big.NewInt(params.InitialBaseFee), Config: params.TestChainConfig}
 	_, blocks, receipts := GenerateChainWithGenesis(gspec, ethash.NewFaker(), total, func(i int, b *BlockGen) {})
 
 	// Reference chain with full history, for expected total difficulties.
@@ -150,7 +150,7 @@ func TestInsertHeadersBeforeCutoff(t *testing.T) {
 // Tests that a history cutoff is refused on a database that already holds
 // unpruned chain history, instead of silently mixing the two layouts.
 func TestHistoryCutoffRejectsUnprunedDatabase(t *testing.T) {
-	gspec := &Genesis{BaseFee: big.NewInt(params.InitialBaseFee), Config: params.AllEthashProtocolChanges}
+	gspec := &Genesis{BaseFee: big.NewInt(params.InitialBaseFee), Config: params.TestChainConfig}
 	_, blocks, _ := GenerateChainWithGenesis(gspec, ethash.NewFaker(), 8, func(i int, b *BlockGen) {})
 
 	datadir := t.TempDir()
