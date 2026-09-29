@@ -1619,7 +1619,7 @@ func (c *Config) buildEth(stack *node.Node, accountManager *accounts.Manager) (*
 		n.StateHistory = c.History.StateHistory
 
 		if c.History.CutoffNumber != 0 {
-			if !common.IsHexHash(c.History.CutoffHash) {
+			if b := common.FromHex(c.History.CutoffHash); len(b) != common.HashLength {
 				return nil, fmt.Errorf("history.cutoff.hash must be the 32-byte hash of block %d, got %q", c.History.CutoffNumber, c.History.CutoffHash)
 			}
 			n.HistoryCutoffNumber = c.History.CutoffNumber

@@ -18,10 +18,10 @@
 package downloader
 
 import (
-	"sort"
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"

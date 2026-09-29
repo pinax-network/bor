@@ -68,7 +68,7 @@ func TestInsertHeadersBeforeCutoff(t *testing.T) {
 		t.Fatalf("failed to create reference chain: %v", err)
 	}
 	defer ref.Stop()
-	if _, err := ref.InsertChain(blocks); err != nil {
+	if _, err := ref.InsertChain(blocks, false); err != nil {
 		t.Fatalf("failed to import reference chain: %v", err)
 	}
 
@@ -159,7 +159,7 @@ func TestHistoryCutoffRejectsUnprunedDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create chain: %v", err)
 	}
-	if _, err := chain.InsertChain(blocks); err != nil {
+	if _, err := chain.InsertChain(blocks, false); err != nil {
 		t.Fatalf("failed to import chain: %v", err)
 	}
 	chain.Stop()
