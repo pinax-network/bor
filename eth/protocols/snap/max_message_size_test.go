@@ -19,8 +19,8 @@ package snap
 import "testing"
 
 // Tests that the message cap admits the 11-14 MB responses seen while snap
-// syncing Amoy, while staying below the largest frame RLPx can carry (the frame
-// size is a 24-bit field).
+// syncing Amoy, while staying within the largest message RLPx can carry (its frame
+// length is a 24-bit field).
 func TestMaxMessageSize(t *testing.T) {
 	const observed = 14_328_926 // largest response that got peers dropped under the 10 MiB cap
 	if maxMessageSize < observed {
