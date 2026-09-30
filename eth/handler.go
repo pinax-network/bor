@@ -242,7 +242,12 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		//   time. But we don't have any recent state for full sync.
 		// In these cases however it's safe to reenable snap sync.
 		fullBlock, snapBlock := h.chain.CurrentBlock(), h.chain.CurrentSnapBlock()
-		if fullBlock.Number.Uint64() == 0 && snapBlock.Number.Uint64() > 0 {
+		if cutoff, _ := h.chain.HistoryPruningCutoff(); fullBlock.Number.Uint64() == 0 && cutoff > 0 {
+			// Blocks below the history cutoff are never stored with bodies, so
+			// they cannot be executed: only snap sync can reach the cutoff.
+			h.snapSync.Store(true)
+			log.Warn("Switch sync mode from full sync to snap sync", "reason", "chain history is pruned", "cutoff", cutoff)
+		} else if fullBlock.Number.Uint64() == 0 && snapBlock.Number.Uint64() > 0 {
 			h.snapSync.Store(true)
 			log.Warn("Switch sync mode from full sync to snap sync", "reason", "snap sync incomplete")
 		} else if !h.chain.HasState(fullBlock.Root) {
