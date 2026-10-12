@@ -5942,49 +5942,63 @@ func TestVerifyHeader_PreGiugliano_NoCheck(t *testing.T) {
 }
 
 // TestApplyMessage_StateSyncTxContext validates if TxContext is correctly
-// set for state-sync transactions.
+// set for state-sync transactions, with and without a Firehose-style tracer.
 func TestApplyMessage_StateSyncTxContext(t *testing.T) {
 	t.Parallel()
-	addr1 := common.HexToAddress("0x1")
-	sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
-	chain, b := newChainAndBorForTest(t, sp, defaultBorConfig(), true, addr1, uint64(time.Now().Unix()))
 
-	genesis := chain.HeaderChain().GetHeaderByNumber(0)
-	statedb := newStateDBForTest(t, genesis.Root)
-
-	// SSTORE(0, ORIGIN); SSTORE(1, GASPRICE); STOP.
-	addr := common.HexToAddress("0xc0ffee")
-	statedb.SetCode(addr, []byte{
-		0x32,       // ORIGIN
-		0x60, 0x00, // PUSH1 0
-		0x55,       // SSTORE -> slot 0 = origin
-		0x3a,       // GASPRICE
-		0x60, 0x01, // PUSH1 1
-		0x55, // SSTORE -> slot 1 = gasprice
-		0x00, // STOP
-	}, tracing.CodeChangeUnspecified)
-
-	h := &types.Header{
-		Number:     big.NewInt(1),
-		ParentHash: genesis.Hash(),
-		Time:       genesis.Time + 2,
-		Coinbase:   addr1,
-		Difficulty: big.NewInt(1),
+	firehoseLikeHooks := &tracing.Hooks{
+		OnTxStartWithHash: func(*tracing.VMContext, *types.Transaction, common.Address, common.Hash) {},
+		OnTxEnd:           func(*types.Receipt, error) {},
 	}
 
-	msg := statefull.GetSystemMessage(addr, nil)
-	_, err := statefull.ApplyMessage(
-		context.Background(), msg, statedb, h, chain.Config(),
-		statefull.ChainContext{Chain: chain.HeaderChain(), Bor: b},
-		nil, 0,
-	)
-	require.NoError(t, err)
+	for name, tracer := range map[string]*tracing.Hooks{
+		"no tracer":       nil,
+		"firehose tracer": firehoseLikeHooks,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			addr1 := common.HexToAddress("0x1")
+			sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
+			chain, b := newChainAndBorForTest(t, sp, defaultBorConfig(), true, addr1, uint64(time.Now().Unix()))
 
-	gotOrigin := common.BytesToAddress(statedb.GetState(addr, common.Hash{}).Bytes())
-	require.Equal(t, common.Address{}, gotOrigin, "ORIGIN must be zero address")
+			genesis := chain.HeaderChain().GetHeaderByNumber(0)
+			statedb := newStateDBForTest(t, genesis.Root)
 
-	gotGasprice := statedb.GetState(addr, common.BigToHash(big.NewInt(1)))
-	require.Equal(t, common.Hash{}, gotGasprice, "GASPRICE must be 0")
+			// SSTORE(0, ORIGIN); SSTORE(1, GASPRICE); STOP.
+			addr := common.HexToAddress("0xc0ffee")
+			statedb.SetCode(addr, []byte{
+				0x32,       // ORIGIN
+				0x60, 0x00, // PUSH1 0
+				0x55,       // SSTORE -> slot 0 = origin
+				0x3a,       // GASPRICE
+				0x60, 0x01, // PUSH1 1
+				0x55, // SSTORE -> slot 1 = gasprice
+				0x00, // STOP
+			}, tracing.CodeChangeUnspecified)
+
+			h := &types.Header{
+				Number:     big.NewInt(1),
+				ParentHash: genesis.Hash(),
+				Time:       genesis.Time + 2,
+				Coinbase:   addr1,
+				Difficulty: big.NewInt(1),
+			}
+
+			msg := statefull.GetSystemMessage(addr, nil)
+			_, err := statefull.ApplyMessage(
+				context.Background(), msg, statedb, h, chain.Config(),
+				statefull.ChainContext{Chain: chain.HeaderChain(), Bor: b},
+				tracer, 0,
+			)
+			require.NoError(t, err)
+
+			gotOrigin := common.BytesToAddress(statedb.GetState(addr, common.Hash{}).Bytes())
+			require.Equal(t, common.Address{}, gotOrigin, "ORIGIN must be zero address")
+
+			gotGasprice := statedb.GetState(addr, common.BigToHash(big.NewInt(1)))
+			require.Equal(t, common.Hash{}, gotGasprice, "GASPRICE must be 0")
+		})
+	}
 }
 
 func TestFinalizeAndAssembleForSimulationSkipsSprintCommits(t *testing.T) {
