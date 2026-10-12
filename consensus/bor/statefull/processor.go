@@ -139,6 +139,7 @@ func ApplyMessage(
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmenv := vm.NewEVM(blockContext, state, chainConfig, vm.Config{Tracer: tracer})
+	vmenv.SetTxContext(core.NewEVMTxContextForStateSync())
 
 	var tx *types.Transaction
 	if tracer != nil {
@@ -159,8 +160,6 @@ func ApplyMessage(
 			tracer.OnTxStart(vmenv.GetVMContext(), tx, msg.From())
 		}
 		state.Inner().SetTxContext(tx.Hash(), 0)
-	} else {
-		vmenv.SetTxContext(core.NewEVMTxContextForStateSync())
 	}
 
 	// nolint : contextcheck
